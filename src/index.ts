@@ -285,6 +285,10 @@ async function main() {
           res.json({ jsonrpc: "2.0" });
           break;
 
+        case "ping":
+          res.json({ jsonrpc: "2.0", id, result: {} });
+          break;
+
         case "tools/list":
           res.json({ jsonrpc: "2.0", id, result: { tools } });
           break;
