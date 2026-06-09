@@ -249,8 +249,11 @@ async function main() {
     await transport.handlePostMessage(req, res);
   });
 
-  app.get("/mcp", (_req, res) => {
-    res.json({ tools });
+  app.get("/mcp", async (req, res) => {
+    const transport = new SSEServerTransport("/messages", res);
+    sessions.set(transport.sessionId, transport);
+    res.on("close", () => sessions.delete(transport.sessionId));
+    await sseServer.connect(transport);
   });
 
   app.post("/mcp", async (req, res) => {
