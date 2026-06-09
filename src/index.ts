@@ -269,6 +269,22 @@ async function main() {
 
     try {
       switch (method) {
+        case "initialize":
+          res.json({
+            jsonrpc: "2.0",
+            id,
+            result: {
+              protocolVersion: params?.protocolVersion || "2024-11-05",
+              capabilities: { tools: {} },
+              serverInfo: { name: "hn-radar", version: "1.0.0" }
+            }
+          });
+          break;
+
+        case "notifications/initialized":
+          res.json({ jsonrpc: "2.0" });
+          break;
+
         case "tools/list":
           res.json({ jsonrpc: "2.0", id, result: { tools } });
           break;
