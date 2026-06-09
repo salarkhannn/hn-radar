@@ -249,8 +249,23 @@ async function main() {
     await transport.handlePostMessage(req, res);
   });
 
+  app.get("/mcp", (_req, res) => {
+    res.json({ tools });
+  });
+
   app.post("/mcp", async (req, res) => {
-    const { id, method, params } = req.body || {};
+    const body = req.body;
+
+    if (!body || !body.method) {
+      res.json({
+        jsonrpc: "2.0",
+        id: body?.id || null,
+        result: { tools },
+      });
+      return;
+    }
+
+    const { id, method, params } = body;
 
     try {
       switch (method) {
@@ -264,14 +279,14 @@ async function main() {
           break;
 
         default:
-          res.status(400).json({
+          res.json({
             jsonrpc: "2.0",
             id,
             error: { code: -32601, message: `Method not found: ${method}` },
           });
       }
     } catch (err) {
-      res.status(500).json({
+      res.json({
         jsonrpc: "2.0",
         id,
         error: { code: -32603, message: err instanceof Error ? err.message : "Internal error" },
