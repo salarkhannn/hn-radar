@@ -1,7 +1,6 @@
 import express from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -231,14 +230,7 @@ async function main() {
   );
   setupHandlers(sseServer);
 
-  const httpServer = new Server(
-    { name: "hn-radar", version: "1.0.0" },
-    { capabilities: { tools: {} } }
-  );
-  setupHandlers(httpServer);
-
-  const httpTransport = new StreamableHTTPServerTransport();
-  httpServer.connect(httpTransport);
+  app.use("/mcp", express.json());
 
   app.get("/sse", async (req, res) => {
     const transport = new SSEServerTransport("/messages", res);
@@ -258,7 +250,33 @@ async function main() {
   });
 
   app.post("/mcp", async (req, res) => {
-    await httpTransport.handleRequest(req, res);
+    const { id, method, params } = req.body || {};
+
+    try {
+      switch (method) {
+        case "tools/list":
+          res.json({ jsonrpc: "2.0", id, result: { tools } });
+          break;
+
+        case "tools/call":
+          const result = await handleToolCall(params?.name, params?.arguments);
+          res.json({ jsonrpc: "2.0", id, result });
+          break;
+
+        default:
+          res.status(400).json({
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32601, message: `Method not found: ${method}` },
+          });
+      }
+    } catch (err) {
+      res.status(500).json({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32603, message: err instanceof Error ? err.message : "Internal error" },
+      });
+    }
   });
 
   app.get("/health", (_req, res) => {
