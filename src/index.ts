@@ -224,20 +224,22 @@ function setupHandlers(server: Server) {
 const sessions = new Map<string, SSEServerTransport>();
 
 async function main() {
-  const sseServer = new Server(
-    { name: "hn-radar", version: "1.0.0" },
-    { capabilities: { tools: {} } }
-  );
-  setupHandlers(sseServer);
-
   app.use("/mcp", express.json());
 
-  app.get("/sse", async (req, res) => {
+  const createSSEServer = async (req: express.Request, res: express.Response) => {
     const transport = new SSEServerTransport("/messages", res);
     sessions.set(transport.sessionId, transport);
     res.on("close", () => sessions.delete(transport.sessionId));
+
+    const sseServer = new Server(
+      { name: "hn-radar", version: "1.0.0" },
+      { capabilities: { tools: {} } }
+    );
+    setupHandlers(sseServer);
     await sseServer.connect(transport);
-  });
+  };
+
+  app.get("/sse", createSSEServer);
 
   app.post("/messages", async (req, res) => {
     const sessionId = req.query.sessionId as string;
@@ -249,12 +251,7 @@ async function main() {
     await transport.handlePostMessage(req, res);
   });
 
-  app.get("/mcp", async (req, res) => {
-    const transport = new SSEServerTransport("/messages", res);
-    sessions.set(transport.sessionId, transport);
-    res.on("close", () => sessions.delete(transport.sessionId));
-    await sseServer.connect(transport);
-  });
+  app.get("/mcp", createSSEServer);
 
   app.post("/mcp", async (req, res) => {
     const body = req.body;
