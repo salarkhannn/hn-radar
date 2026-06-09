@@ -1,6 +1,6 @@
 import express from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -128,8 +128,9 @@ async function getRedditTrending(subreddit: string) {
   }));
 }
 
+const sessions = new Map<string, SSEServerTransport>();
+
 async function main() {
-  const transport = new StreamableHTTPServerTransport();
   const server = new Server(
     {
       name: "hn-radar",
@@ -141,8 +142,6 @@ async function main() {
       },
     }
   );
-
-  await server.connect(transport);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
@@ -236,8 +235,21 @@ async function main() {
     }
   });
 
-  app.post("/mcp", async (req, res) => {
-    await transport.handleRequest(req, res);
+  app.get("/sse", async (req, res) => {
+    const transport = new SSEServerTransport("/messages", res);
+    sessions.set(transport.sessionId, transport);
+    res.on("close", () => sessions.delete(transport.sessionId));
+    await server.connect(transport);
+  });
+
+  app.post("/messages", async (req, res) => {
+    const sessionId = req.query.sessionId as string;
+    const transport = sessions.get(sessionId);
+    if (!transport) {
+      res.status(404).send("Session not found");
+      return;
+    }
+    await transport.handlePostMessage(req, res);
   });
 
   app.get("/health", (_req, res) => {
