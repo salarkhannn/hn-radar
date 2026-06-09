@@ -1,6 +1,7 @@
 import express from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -128,118 +129,122 @@ async function getRedditTrending(subreddit: string) {
   }));
 }
 
+const tools = [
+  {
+    name: "get_top_stories",
+    description:
+      "Fetches the current top 10 stories from Hacker News via the official Firebase API. Returns title, URL, score, and comment count for each story. No auth needed.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "search_hn",
+    description:
+      "Searches Hacker News stories using the Algolia HN Search API. Returns the top 5 results with title, URL, points, and num_comments.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The search query string",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "get_reddit_trending",
+    description:
+      "Fetches the top 5 hot posts from a subreddit via the Reddit OAuth API. Requires REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET env vars. Returns title, URL, score, and comment count.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subreddit: {
+          type: "string",
+          description: "Subreddit name (default: 'programming')",
+        },
+      },
+    },
+  },
+];
+
+async function handleToolCall(name: string, args: Record<string, unknown> | undefined) {
+  switch (name) {
+    case "get_top_stories": {
+      const stories = await getTopStories();
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(stories, null, 2) }],
+      };
+    }
+
+    case "search_hn": {
+      const query = args?.query as string;
+      if (!query) {
+        return {
+          content: [{ type: "text" as const, text: "Error: 'query' parameter is required" }],
+          isError: true,
+        };
+      }
+      const results = await searchHN(query);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }],
+      };
+    }
+
+    case "get_reddit_trending": {
+      const subreddit = (args?.subreddit as string) || "programming";
+      if (!REDDIT_CLIENT_ID || !REDDIT_CLIENT_SECRET) {
+        return {
+          content: [{ type: "text" as const, text: "Reddit API credentials not configured. Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET environment variables. Create a script app at https://www.reddit.com/prefs/apps" }],
+          isError: true,
+        };
+      }
+      const posts = await getRedditTrending(subreddit);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(posts, null, 2) }],
+      };
+    }
+
+    default:
+      return {
+        content: [{ type: "text" as const, text: `Unknown tool: ${name}` }],
+        isError: true,
+      };
+  }
+}
+
+function setupHandlers(server: Server) {
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    return handleToolCall(request.params.name, request.params.arguments);
+  });
+}
+
 const sessions = new Map<string, SSEServerTransport>();
 
 async function main() {
-  const server = new Server(
-    {
-      name: "hn-radar",
-      version: "1.0.0",
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
+  const sseServer = new Server(
+    { name: "hn-radar", version: "1.0.0" },
+    { capabilities: { tools: {} } }
   );
+  setupHandlers(sseServer);
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
-        {
-          name: "get_top_stories",
-          description:
-            "Fetches the current top 10 stories from Hacker News via the official Firebase API. Returns title, URL, score, and comment count for each story. No auth needed.",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
-          name: "search_hn",
-          description:
-            "Searches Hacker News stories using the Algolia HN Search API. Returns the top 5 results with title, URL, points, and num_comments.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "The search query string",
-              },
-            },
-            required: ["query"],
-          },
-        },
-        {
-          name: "get_reddit_trending",
-          description:
-            "Fetches the top 5 hot posts from a subreddit via the Reddit OAuth API. Requires REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET env vars. Returns title, URL, score, and comment count.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              subreddit: {
-                type: "string",
-                description: "Subreddit name (default: 'programming')",
-              },
-            },
-          },
-        },
-      ],
-    };
-  });
+  const httpServer = new Server(
+    { name: "hn-radar", version: "1.0.0" },
+    { capabilities: { tools: {} } }
+  );
+  setupHandlers(httpServer);
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-
-    switch (name) {
-      case "get_top_stories": {
-        const stories = await getTopStories();
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(stories, null, 2) }],
-        };
-      }
-
-      case "search_hn": {
-        const query = args?.query as string;
-        if (!query) {
-          return {
-            content: [{ type: "text" as const, text: "Error: 'query' parameter is required" }],
-            isError: true,
-          };
-        }
-        const results = await searchHN(query);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }],
-        };
-      }
-
-      case "get_reddit_trending": {
-        const subreddit = (args?.subreddit as string) || "programming";
-        if (!REDDIT_CLIENT_ID || !REDDIT_CLIENT_SECRET) {
-          return {
-            content: [{ type: "text" as const, text: "Reddit API credentials not configured. Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET environment variables. Create a script app at https://www.reddit.com/prefs/apps" }],
-            isError: true,
-          };
-        }
-        const posts = await getRedditTrending(subreddit);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(posts, null, 2) }],
-        };
-      }
-
-      default:
-        return {
-          content: [{ type: "text" as const, text: `Unknown tool: ${name}` }],
-          isError: true,
-        };
-    }
-  });
+  const httpTransport = new StreamableHTTPServerTransport();
+  httpServer.connect(httpTransport);
 
   app.get("/sse", async (req, res) => {
     const transport = new SSEServerTransport("/messages", res);
     sessions.set(transport.sessionId, transport);
     res.on("close", () => sessions.delete(transport.sessionId));
-    await server.connect(transport);
+    await sseServer.connect(transport);
   });
 
   app.post("/messages", async (req, res) => {
@@ -250,6 +255,10 @@ async function main() {
       return;
     }
     await transport.handlePostMessage(req, res);
+  });
+
+  app.post("/mcp", async (req, res) => {
+    await httpTransport.handleRequest(req, res);
   });
 
   app.get("/health", (_req, res) => {
